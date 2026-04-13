@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Claude Code local config (user-specific)
+.claude/settings.local.json
+
+# Runtime session state (handoff notes, logs)
+.remember/
