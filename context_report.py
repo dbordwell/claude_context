@@ -110,21 +110,39 @@ def parse_transcript(path):
     return turns, session_id, model
 
 
-def get_context_window_size(model):
-    """Return context window size based on model."""
-    if not model:
-        return 200_000  # conservative default
-    m = model.lower()
-    if "opus" in m and ("4-6" in m or "4.6" in m):
-        return 1_048_576
-    if "opus" in m:
-        return 200_000
-    if "sonnet" in m and ("4-6" in m or "4.6" in m):
-        return 1_048_576
-    if "sonnet" in m:
-        return 200_000
-    if "haiku" in m:
-        return 200_000
+def get_context_window_size(model, turns=None):
+    """Return context window size, detecting 1M variants from multiple signals.
+
+    Signal priority (first match wins):
+      1. CLAUDE_CONTEXT_WINDOW env var (explicit override)
+      2. [1m] suffix in model name (future-proof if the transcript preserves it)
+      3. Legacy 4.6 family (was 1M before the [1m] convention existed)
+      4. Observed-usage heuristic (any past turn > 200k implies 1M)
+      5. Default 200k
+
+    The Anthropic API strips the [1m] suffix before writing the model field to
+    the transcript, so opus-4-7[1m] sessions arrive here as plain 'claude-opus-4-7'.
+    The env var and heuristic together cover that case.
+    """
+    override = os.environ.get("CLAUDE_CONTEXT_WINDOW")
+    if override:
+        try:
+            return int(override)
+        except ValueError:
+            pass
+
+    if model:
+        m = model.lower()
+        if "[1m]" in m:
+            return 1_048_576
+        if ("opus" in m or "sonnet" in m) and ("4-6" in m or "4.6" in m):
+            return 1_048_576
+
+    if turns:
+        max_input = max((t.get("total_input", 0) for t in turns), default=0)
+        if max_input > 200_000:
+            return 1_048_576
+
     return 200_000
 
 
@@ -148,7 +166,7 @@ def report(path):
         return
 
     unique_turns = list(deduplicate_turns(turns))
-    context_size = get_context_window_size(model)
+    context_size = get_context_window_size(model, unique_turns)
 
     # Latest turn = current context state
     latest = unique_turns[-1]
@@ -278,7 +296,7 @@ def hook_mode(path):
         return
 
     unique_turns = list(deduplicate_turns(turns))
-    context_size = get_context_window_size(model)
+    context_size = get_context_window_size(model, unique_turns)
     latest = unique_turns[-1]
     current_context = latest["total_input"]
     used_pct = (current_context / context_size) * 100
